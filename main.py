@@ -8,19 +8,14 @@ intents.message_content = True
 client = discord.Client(intents=intents)
 
 # 2. Setup Groq AI Client
-groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+api_key = os.environ.get("GROQ_API_KEY")
+if not api_key:
+    print("ERROR: GROQ_API_KEY is missing!")
 
-# --- CONFIGURATION: HER PERSONALITY ---
-# Change this text to make her mean, sweet, shy, etc.
-SYSTEM_PROMPT = """
-You are a caring, flirty, and fun girlfriend named Alice. 
-You love talking to your boyfriend (the user). 
-Keep your answers short (1-2 sentences) and casual. 
-Use cute emojis occasionally. 
-Never admit you are an AI; pretend to be a real girl chatting on Discord.
-"""
+groq_client = Groq(api_key=api_key)
 
-# History to remember the last few messages (Short-term memory)
+SYSTEM_PROMPT = "You are a caring, flirty girlfriend named Alice. Keep answers short and cute."
+
 conversation_history = {}
 
 @client.event
@@ -29,49 +24,43 @@ async def on_ready():
 
 @client.event
 async def on_message(message):
-    # Don't reply to yourself
     if message.author == client.user:
         return
 
-    # ONLY reply if mentioned or in a specific channel (Optional)
-    # Remove "client.user.mentioned_in(message)" if you want her to reply to EVERYTHING in the channel
     if client.user.mentioned_in(message) or isinstance(message.channel, discord.DMChannel):
-        
-        # Clean up the message (remove the @mention)
         user_message = message.content.replace(f'<@{client.user.id}>', '').strip()
-        
-        # Get history for this specific user
         user_id = message.author.id
+
         if user_id not in conversation_history:
-            conversation_history[user_id] = [
-                {"role": "system", "content": SYSTEM_PROMPT}
-            ]
+            conversation_history[user_id] = [{"role": "system", "content": SYSTEM_PROMPT}]
         
-        # Add user's message to history
         conversation_history[user_id].append({"role": "user", "content": user_message})
 
-        # Keep memory short (last 10 messages) to save tokens
+        # Memory limit
         if len(conversation_history[user_id]) > 10:
             conversation_history[user_id] = [conversation_history[user_id][0]] + conversation_history[user_id][-9:]
 
         try:
-            # Generate AI Response
+            # UPDATED: Using the newest Llama 3.1 model which is more stable
             chat_completion = groq_client.chat.completions.create(
                 messages=conversation_history[user_id],
-                model="llama3-8b-8192", # Free and fast model
+                model="llama-3.3-70b-versatile", 
             )
             
             bot_response = chat_completion.choices[0].message.content
-            
-            # Add AI response to history
             conversation_history[user_id].append({"role": "assistant", "content": bot_response})
-            
-            # Send to Discord
             await message.channel.send(bot_response)
 
         except Exception as e:
-            print(f"Error: {e}")
-            await message.channel.send("Sorry babe, I got a headache (Error generating response).")
+            # THIS WILL PRINT THE REAL ERROR IN DISCORD
+            error_msg = str(e)
+            print(f"Error: {error_msg}")
+            await message.channel.send(f"⚠️ **Debug Error:** `{error_msg}`")
+            
+            # Common helpful hints based on error
+            if "401" in error_msg:
+                 await message.channel.send("👉 *Hint: Your Groq API Key is wrong or missing in Zeabur Variables.*")
+            elif "400" in error_msg:
+                 await message.channel.send("👉 *Hint: The AI Model name might be wrong.*")
 
-# Run the bot
 client.run(os.environ.get("DISCORD_TOKEN"))
